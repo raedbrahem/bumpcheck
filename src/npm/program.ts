@@ -101,20 +101,60 @@ export function walkSources(root: string): string[] {
   return out.sort();
 }
 
+function parseConfig(configPath: string): ts.ParsedCommandLine | undefined {
+  const raw = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (raw.error) return undefined;
+  return ts.parseJsonConfigFileContent(raw.config, ts.sys, path.dirname(configPath), undefined, configPath);
+}
+
+function configWarnings(configPath: string, parsed: ts.ParsedCommandLine): string[] {
+  return parsed.errors
+    .filter((e) => e.category === ts.DiagnosticCategory.Error)
+    .map((e) => ts.flattenDiagnosticMessageText(e.messageText, ' '))
+    .filter((m) => /extends|not found|cannot read/i.test(m))
+    .map((m) => `${path.basename(configPath)}: ${m} (analyzed without it; strictness may differ from your build)`);
+}
+
+interface Project {
+  config: string;
+  fileNames: string[];
+  options: ts.CompilerOptions;
+  warnings: string[];
+}
+
+/**
+ * A config that lists files is one project. A solution-style config, with
+ * `files: []` and `references` as Vite templates ship, owns no files, so the
+ * projects it references stand in for it.
+ */
+function collectProjects(configPath: string, seen: Set<string>): Project[] {
+  if (seen.has(configPath)) return [];
+  seen.add(configPath);
+  const parsed = parseConfig(configPath);
+  if (!parsed) return [];
+  if (parsed.fileNames.length > 0) {
+    return [{ config: configPath, fileNames: parsed.fileNames, options: parsed.options, warnings: configWarnings(configPath, parsed) }];
+  }
+  return (parsed.projectReferences ?? []).flatMap((ref) => collectProjects(ts.resolveProjectReferencePath(ref), seen));
+}
+
 export function loadRepoConfig(repoRoot: string): RepoConfig {
   const configPath = ts.findConfigFile(repoRoot, ts.sys.fileExists, 'tsconfig.json');
   if (configPath && (isInside(repoRoot, configPath) || path.dirname(configPath) === repoRoot)) {
-    const raw = ts.readConfigFile(configPath, ts.sys.readFile);
-    if (!raw.error) {
-      const parsed = ts.parseJsonConfigFileContent(raw.config, ts.sys, path.dirname(configPath), undefined, configPath);
-      if (parsed.fileNames.length > 0) {
-        const warnings = parsed.errors
-          .filter((e) => e.category === ts.DiagnosticCategory.Error)
-          .map((e) => ts.flattenDiagnosticMessageText(e.messageText, ' '))
-          .filter((m) => /extends|not found|cannot read/i.test(m))
-          .map((m) => `${path.basename(configPath)}: ${m} (analyzed without it; strictness may differ from your build)`);
-        return { options: sanitize(parsed.options), fileNames: parsed.fileNames, source: 'tsconfig', warnings };
+    const projects = collectProjects(configPath, new Set());
+    const first = projects[0];
+    if (first) {
+      const warnings = projects.flatMap((p) => p.warnings);
+      if (first.config !== configPath) {
+        // tsc -b checks each referenced project with its own options. One
+        // program cannot, so the first project's options apply to all.
+        const names = projects.map((p) => path.relative(repoRoot, p.config)).join(', ');
+        warnings.push(
+          `${path.basename(configPath)}: no files of its own; analyzed the ${projects.length} project${projects.length === 1 ? '' : 's'} it references (${names}) as one program with the options of ${path.relative(repoRoot, first.config)} (tsc -b checks each on its own; strictness may differ from your build)`,
+        );
       }
+      const fileNames = [...new Set(projects.flatMap((p) => p.fileNames))];
+      return { options: sanitize(first.options), fileNames, source: 'tsconfig', warnings };
     }
   }
   return {

@@ -47,7 +47,9 @@ says how many imports could not be resolved.
 Each run analyzes one project root under that directory's `tsconfig.json`.
 `--since` picks the right directory for each bumped `package.json`. Nested
 packages that share a `package.json` but have their own `tsconfig.json` are
-not yet discovered.
+not yet discovered. A `tsconfig.json` that only lists `references`, as Vite
+templates do, is followed: the referenced projects are analyzed as one program
+with the first one's options, and the report says so.
 
 ## Use
 
