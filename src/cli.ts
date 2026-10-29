@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { analyzeNpm } from './npm/analyze.js';
-import { detectBumps } from './git.js';
+import { detectChanges, type Detection } from './git.js';
 import type { Report } from './types.js';
 import { NpmProvider } from './registry/provider.js';
 import { renderMarkdown, renderText } from './report/render.js';
@@ -70,12 +70,14 @@ async function main(argv: string[]): Promise<number> {
   const repoRoot = path.resolve(values.repo ?? process.cwd());
   const provider = new NpmProvider(providerOpts);
 
-  const targets = values.since
-    ? detectBumps(repoRoot, values.since)
-    : [{ dir: '', pkg: positionals[0]!, from: positionals[1]!, to: positionals[2]! }];
+  const detection: Detection = values.since
+    ? detectChanges(repoRoot, values.since)
+    : { bumps: [{ dir: '', pkg: positionals[0]!, from: positionals[1]!, to: positionals[2]! }], transitive: [] };
+  const targets = detection.bumps;
 
   if (targets.length === 0) {
-    process.stdout.write(`No direct dependency versions changed since ${values.since}.\n`);
+    process.stdout.write(renderNoBumps(values.since!, detection, format) + '\n');
+    if (values['json-out']) await writeFile(values['json-out'], JSON.stringify([], null, 2) + '\n');
     return 0;
   }
 
@@ -96,6 +98,37 @@ async function main(argv: string[]): Promise<number> {
   }
 
   return reports.some((r) => r.breaks.length > 0) && !values['no-fail'] ? 1 : 0;
+}
+
+/**
+ * A lockfile-only pull request has nothing bumpcheck can check, since it
+ * only analyzes packages the repo imports directly. Say what moved anyway,
+ * so the comment explains itself.
+ */
+function renderNoBumps(since: string, detection: Detection, format: string): string {
+  const md = format === 'markdown';
+  const lines: string[] = [];
+  lines.push(md ? `### bumpcheck` : 'bumpcheck');
+  lines.push('');
+  lines.push(`No direct dependency changed since ${since}, so there is nothing to typecheck against.`);
+  if (detection.transitive.length > 0) {
+    const n = detection.transitive.length;
+    lines.push('');
+    lines.push(`${n} transitive package${n === 1 ? '' : 's'} moved in the lockfile:`);
+    lines.push('');
+    for (const t of detection.transitive.slice(0, 20)) {
+      const where = t.dir ? ` (in ${t.dir}/)` : '';
+      lines.push(md ? `- \`${t.pkg}\` ${t.from} → ${t.to}${where}` : `  ${t.pkg} ${t.from} -> ${t.to}${where}`);
+    }
+    if (n > 20) lines.push(md ? `- … ${n - 20} more` : `  … ${n - 20} more`);
+    lines.push('');
+    lines.push(
+      md
+        ? '<sub>bumpcheck checks packages this repo imports directly. Transitive changes are listed for the record and are not analyzed.</sub>'
+        : 'bumpcheck checks packages this repo imports directly. Transitive changes are listed for the record and are not analyzed.',
+    );
+  }
+  return lines.join('\n');
 }
 
 main(process.argv.slice(2)).then(

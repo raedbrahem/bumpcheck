@@ -10,6 +10,19 @@ export interface DetectedBump {
   to: string;
 }
 
+/** A lockfile entry that moved without being a direct dependency. */
+export interface TransitiveChange {
+  dir: string;
+  pkg: string;
+  from: string;
+  to: string;
+}
+
+export interface Detection {
+  bumps: DetectedBump[];
+  transitive: TransitiveChange[];
+}
+
 const DEP_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const;
 
 type Manifest = Partial<Record<(typeof DEP_FIELDS)[number], Record<string, string>>>;
@@ -44,6 +57,15 @@ export function exactVersion(spec: string | undefined): string | undefined {
  * specs like `^1.2.0` resolve to the versions actually installed.
  */
 export function detectBumps(repoRoot: string, base: string, head = 'HEAD'): DetectedBump[] {
+  return detectChanges(repoRoot, base, head).bumps;
+}
+
+/**
+ * Direct bumps plus transitive lockfile moves. bumpcheck can only analyze
+ * what the repo imports directly, so the transitive list exists to explain
+ * a lockfile-only pull request rather than to be checked.
+ */
+export function detectChanges(repoRoot: string, base: string, head = 'HEAD'): Detection {
   const changed = git(repoRoot, ['diff', '--name-only', base, head, '--', '*package.json', '*package-lock.json'])
     ?.split('\n')
     .map((l) => l.trim())
@@ -52,6 +74,7 @@ export function detectBumps(repoRoot: string, base: string, head = 'HEAD'): Dete
 
   const dirs = new Set(changed.map((f) => path.posix.dirname(f)).map((d) => (d === '.' ? '' : d)));
   const bumps: DetectedBump[] = [];
+  const transitive: TransitiveChange[] = [];
 
   for (const dir of [...dirs].sort()) {
     const manifestPath = dir ? `${dir}/package.json` : 'package.json';
@@ -79,6 +102,19 @@ export function detectBumps(repoRoot: string, base: string, head = 'HEAD'): Dete
       if (!from || !to || from === to) continue;
       bumps.push({ dir, pkg: name, from, to });
     }
+
+    // Top-level lockfile entries that moved but are not direct dependencies.
+    const direct = new Set(names);
+    const pkgsBefore = lockBefore?.packages ?? {};
+    const pkgsAfter = lockAfter?.packages ?? {};
+    for (const key of Object.keys(pkgsAfter).sort()) {
+      if (!key.startsWith('node_modules/') || key.indexOf('node_modules/', 'node_modules/'.length) !== -1) continue;
+      const name = key.slice('node_modules/'.length);
+      if (direct.has(name)) continue;
+      const from = pkgsBefore[key]?.version;
+      const to = pkgsAfter[key]?.version;
+      if (from && to && from !== to) transitive.push({ dir, pkg: name, from, to });
+    }
   }
-  return bumps;
+  return { bumps, transitive };
 }

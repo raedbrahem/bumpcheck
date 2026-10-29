@@ -1,6 +1,6 @@
 {
   "name": "bumpcheck",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Prove whether a dependency bump breaks the code that imports it. Facts with line numbers, nothing else.",
   "license": "Apache-2.0",
   "type": "module",

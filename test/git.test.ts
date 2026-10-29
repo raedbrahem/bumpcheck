@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { detectBumps, exactVersion } from '../src/git.js';
+import { detectBumps, detectChanges, exactVersion } from '../src/git.js';
 
 function git(cwd: string, ...args: string[]): void {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -37,7 +37,9 @@ describe('detectBumps', () => {
     await repoWith(
       {
         'package.json': { dependencies: { zod: '^3.23.0', left: '1.0.0' } },
-        'package-lock.json': { packages: { 'node_modules/zod': { version: '3.23.8' } } },
+        'package-lock.json': {
+          packages: { 'node_modules/zod': { version: '3.23.8' }, 'node_modules/systeminformation': { version: '5.33.15' } },
+        },
         'web/package.json': { dependencies: { react: '19.0.0' }, devDependencies: { vitest: '^2.0.0' } },
       },
       cwd,
@@ -46,7 +48,9 @@ describe('detectBumps', () => {
     await repoWith(
       {
         'package.json': { dependencies: { zod: '^4.0.0', left: '1.0.0', added: '1.0.0' } },
-        'package-lock.json': { packages: { 'node_modules/zod': { version: '4.1.12' } } },
+        'package-lock.json': {
+          packages: { 'node_modules/zod': { version: '4.1.12' }, 'node_modules/systeminformation': { version: '5.33.18' } },
+        },
         'web/package.json': { dependencies: { react: '19.0.0' }, devDependencies: { vitest: '^3.0.0' } },
       },
       cwd,
@@ -55,6 +59,9 @@ describe('detectBumps', () => {
     expect(detectBumps(cwd, 'HEAD~1')).toEqual([
       { dir: '', pkg: 'zod', from: '3.23.8', to: '4.1.12' },
       { dir: 'web', pkg: 'vitest', from: '2.0.0', to: '3.0.0' },
+    ]);
+    expect(detectChanges(cwd, 'HEAD~1').transitive).toEqual([
+      { dir: '', pkg: 'systeminformation', from: '5.33.15', to: '5.33.18' },
     ]);
   });
 });
