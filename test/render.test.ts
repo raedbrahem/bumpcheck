@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderMarkdown, renderText } from '../src/index.js';
+import { renderMarkdown, renderText, type Report } from '../src/index.js';
 import { normalizeDeclaration } from '../src/npm/exports.js';
 import { analyzeFixture } from './helpers.js';
 
@@ -18,7 +18,7 @@ describe('renderers', () => {
   it('text leads with the headline and lists breaks with locations', async () => {
     const text = renderText(await analyzeFixture('1.0.0', '2.0.0'));
     expect(text.split('\n')[0]).toBe('demo-lib 1.0.0 -> 2.0.0');
-    expect(text).toContain('9 breaks in 7 symbols');
+    expect(text).toContain('10 breaks in 7 symbols');
     expect(text).toContain('src/main.ts:6:1');
     expect(text).toContain('Behavior not checked');
   });
@@ -53,5 +53,25 @@ describe('grouping and clips', () => {
     const text = renderText(report);
     expect(text).toContain('before: export declare function greet ( name : string , greeting ? : string ) : string ;');
     expect(text).toContain('after:  export declare function greet ( name : string , options ? : { greeting : string } ) : string ;');
+  });
+});
+
+describe('type-only packages', () => {
+  it('explains that @types packages apply globally instead of saying nothing imports them', () => {
+    const report: Report = {
+      schemaVersion: 1,
+      ecosystem: 'npm',
+      package: '@types/node',
+      from: '26.6.4',
+      to: '26.6.5',
+      files: [],
+      imports: [],
+      breaks: [],
+      unanalyzed: [],
+      summary: { importedSymbols: 0, unchanged: 0, changed: 0, breaking: 0, removed: 0, unknown: 0, breaks: 0, unanalyzed: 0 },
+      meta: { typescript: '5.9.3', durationMs: 1, untyped: false },
+    };
+    expect(renderText(report)).toContain('@types/node is a type-only package');
+    expect(renderText(report)).not.toContain('Nothing in this repo imports');
   });
 });

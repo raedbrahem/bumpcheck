@@ -87,11 +87,22 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
-      - run: npm ci --ignore-scripts
+      - name: Install
+        id: install
+        continue-on-error: true
+        run: npm ci --ignore-scripts
       - name: bumpcheck
         id: run
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          INSTALL_OK: ${{ steps.install.outcome == 'success' }}
         run: |
-          npx bumpcheck --since origin/${{ github.base_ref }} --format markdown --json-out report.json > comment.md \
+          if [ "$INSTALL_OK" != "true" ]; then
+            printf '### bumpcheck\n\nDependencies could not be installed on this pull request (`npm ci` failed), so nothing was checked. See the Install step of this job.\n' > comment.md
+            echo "install_failed=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          npx bumpcheck@latest --since "origin/$BASE_REF" --format markdown --json-out report.json > comment.md \
             || echo "failed=1" >> "$GITHUB_OUTPUT"
           unknown=$(node -p 'const r=[].concat(require("./report.json")); r.reduce((n,x)=>n+x.summary.unknown+x.summary.unanalyzed,0)' 2>/dev/null || echo 0)
           if [ "$unknown" != "0" ]; then
@@ -101,13 +112,15 @@ jobs:
         with:
           header: bumpcheck
           path: comment.md
-      - name: Fail on breaks
-        if: steps.run.outputs.failed == '1'
+      - name: Fail on breaks or a broken install
+        if: steps.run.outputs.failed == '1' || steps.run.outputs.install_failed == '1'
         run: exit 1
 ```
 
 The job fails when any package reported a break, after the comment is
-posted. Imports that could not be checked keep the job green and add a
+posted. A pull request whose lockfile cannot be installed gets a comment
+saying so and a failed job, since that is a problem with the pull request,
+not a verdict. Imports that could not be checked keep the job green and add a
 warning annotation, so a green check means "no proven break", not "safe".
 If more than one project needs `npm ci`, add a step per directory.
 

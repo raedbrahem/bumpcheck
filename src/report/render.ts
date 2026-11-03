@@ -68,6 +68,12 @@ function headline(r: Report): string {
   if (r.meta.untyped) {
     return `You import ${what} from ${r.package}. ${r.to} ships no type declarations, so nothing could be checked.`;
   }
+  if (n === 0 && r.package.startsWith('@types/')) {
+    return (
+      `${r.package} is a type-only package: its declarations apply globally without an import, ` +
+      `so there is nothing to trace to a call site. bumpcheck does not compare global declarations.`
+    );
+  }
   if (n === 0) {
     return `Nothing in this repo imports ${r.package}.`;
   }

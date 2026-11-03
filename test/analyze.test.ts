@@ -21,6 +21,7 @@ describe('demo-lib 1.0.0 -> 2.0.0', () => {
   it('reports exactly the planted breaks, with line numbers and attribution', () => {
     const compact = report.breaks.map((b) => [b.kind, b.symbol, `${b.location.file}:${b.location.line}`, b.attribution]);
     expect(compact).toEqual([
+      ['type-mismatch', 'greet', 'src/dyn.ts:8', 'binding'],
       ['arity', 'extra', 'src/extra.ts:3', 'binding'],
       ['missing-member', 'fetchThing', 'src/indirect.ts:6', 'type'],
       ['type-mismatch', 'greet', 'src/legacy.js:3', 'binding'],
@@ -75,6 +76,15 @@ describe('demo-lib 1.0.0 -> 2.0.0', () => {
     expect(byName(report, 'stable').status).toBe('unchanged');
   });
 
+  it('follows literal dynamic imports bound with await, lists the rest', () => {
+    const stable = byName(report, 'stable').locations.map((l) => l.file);
+    expect(stable).toContain('src/dyn.ts');
+    const greet = byName(report, 'greet').locations.map((l) => `${l.file}:${l.line}`);
+    expect(greet).toContain('src/dyn.ts:7');
+    const dyn = report.unanalyzed.find((u) => u.reason === 'dynamic import("demo-lib")');
+    expect(dyn?.locations.map((l) => l.line)).toEqual([12]);
+  });
+
   it('merges namespace member accesses into the same symbol', () => {
     const files = byName(report, 'stable').locations.map((l) => l.file);
     expect(files).toContain('src/ns.ts');
@@ -102,7 +112,7 @@ describe('demo-lib 1.0.0 -> 2.0.0', () => {
       breaking: 6,
       removed: 1,
       unknown: 0,
-      breaks: 9,
+      breaks: 10,
     });
   });
 

@@ -169,7 +169,28 @@ export function scanImports(repoRoot: string, built: BuiltProgram, pkg: string, 
         const spec = specifierOf(node.arguments[0]);
         if (spec && isTargetSpecifier(spec, pkg)) {
           touched = true;
-          addUnanalyzed(`dynamic import("${spec}")`, toLocation(repoRoot, sf, node));
+          // `const m = await import('pkg')` binds like a namespace import and
+          // `const { a } = await import('pkg')` like a named one. Anything
+          // else (a .then chain, a bare await) is listed, not guessed.
+          const awaited = node.parent && ts.isAwaitExpression(node.parent) ? node.parent : undefined;
+          const decl = awaited?.parent && ts.isVariableDeclaration(awaited.parent) ? awaited.parent : undefined;
+          if (decl && ts.isIdentifier(decl.name)) {
+            const sym = checker.getSymbolAtLocation(decl.name);
+            if (sym) namespaces.set(sym, spec);
+            else addUnanalyzed(`dynamic import("${spec}")`, toLocation(repoRoot, sf, node));
+          } else if (decl && ts.isObjectBindingPattern(decl.name)) {
+            for (const el of decl.name.elements) {
+              const prop = el.propertyName ?? el.name;
+              if (el.dotDotDotToken || !ts.isIdentifier(prop)) {
+                addUnanalyzed(`dynamic import("${spec}") with a rest or computed binding`, toLocation(repoRoot, sf, el));
+                continue;
+              }
+              addRef(spec, prop.text, toLocation(repoRoot, sf, el));
+              if (ts.isIdentifier(el.name)) bindLocal(sf, el.name.text, prop.text, spec);
+            }
+          } else {
+            addUnanalyzed(`dynamic import("${spec}")`, toLocation(repoRoot, sf, node));
+          }
         }
       } else if (isRequireCall(node) && !(node.parent && ts.isVariableDeclaration(node.parent))) {
         const spec = (node.arguments[0] as ts.StringLiteralLike).text;
